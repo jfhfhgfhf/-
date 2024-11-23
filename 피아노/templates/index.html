@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>피아노 악보 생성기</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .upload-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .generate-btn {
+            padding: 8px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .generate-btn:hover {
+            background-color: #0056b3;
+        }
+
+        .youtube-url {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .file-upload {
+            width: 100%;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 2px dashed #ddd;
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .file-upload:hover {
+            border-color: #007BFF;
+            background-color: #f1f8ff;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #error {
+            display: none;
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        .result-container {
+            display: none;
+        }
+
+        .sheet-music {
+            margin-bottom: 20px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-button {
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .action-button:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>피아노 악보 생성기</h1>
+        <div class="upload-section">
+            <div class="input-group">
+                <input type="text" id="youtube-url" class="youtube-url" placeholder="YouTube URL을 입력하세요">
+                <button class="generate-btn" onclick="handleYouTubeURL()">생성</button>
+            </div>
+            <div class="file-upload" id="drop-zone">
+                <p>파일을 드래그하거나 클릭하여 업로드</p>
+                <input type="file" id="file-input" accept="audio/*" onchange="handleFileUpload()">
+                <button class="generate-btn" onclick="document.getElementById('file-input').click()">파일 선택</button>
+            </div>
+        </div>
+
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <p>악보를 생성하는 중입니다...</p>
+        </div>
+
+        <div id="error"></div>
+
+        <div class="result-container">
+            <h2>변환 결과</h2>
+            <div class="sheet-music">
+                <iframe id="pdf-viewer" style="width: 100%; height: 500px; border: none;"></iframe>
+            </div>
+            <div class="controls">
+                <button onclick="downloadPDF()" class="action-button">PDF 다운로드</button>
+                <button onclick="playMIDI()" class="action-button">피아노 연주</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentMidiFile = null;
+
+        function showLoading() {
+            document.querySelector('.loading').style.display = 'block';
+            document.querySelector('.result-container').style.display = 'none';
+        }
+
+        function hideLoading() {
+            document.querySelector('.loading').style.display = 'none';
+            document.querySelector('.result-container').style.display = 'block';
+        }
+
+        // 파일 드래그 앤 드롭 처리
+        const dropZone = document.getElementById('drop-zone');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.add('highlight');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.remove('highlight');
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                document.getElementById('file-input').files = files;
+                handleFileUpload();
+            }
+        }
+
+        function handleResponse(response) {
+            hideLoading();
+            if (response.success) {
+                document.getElementById('pdf-viewer').src = '/sheet_music/' + response.sheet_music;
+                currentMidiFile = response.midi_file;
+            } else {
+                alert('오류가 발생했습니다: ' + response.error);
+            }
+        }
+
+        async function handleFileUpload() {
+            const fileInput = document.getElementById('file-input');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('파일을 선택해주세요.');
+                return;
+            }
+
+            showLoading();
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                handleResponse(data);
+            } catch (error) {
+                hideLoading();
+                alert('오류가 발생했습니다: ' + error);
+            }
+        }
+
+        async function handleYouTubeURL() {
+            const urlInput = document.getElementById('youtube-url');
+            const url = urlInput.value.trim();
+            if (!url) {
+                alert('YouTube URL을 입력해주세요.');
+                return;
+            }
+
+            showLoading();
+            const formData = new FormData();
+            formData.append('youtube_url', url);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                handleResponse(data);
+            } catch (error) {
+                hideLoading();
+                alert('오류가 발생했습니다: ' + error);
+            }
+        }
+
+        function downloadPDF() {
+            window.open('/sheet_music/sheet_music.pdf', '_blank');
+        }
+
+        function playMIDI() {
+            if (currentMidiFile) {
+                window.open('/play_midi/' + currentMidiFile, '_blank');
+            } else {
+                alert('MIDI 파일이 생성되지 않았습니다.');
+            }
+        }
+    </script>
+</body>
+</html>
